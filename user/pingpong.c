@@ -3,21 +3,19 @@
 #include "user/user.h"
 
 int main(){
-  int pid=fork();
-  int p1[2];
-  int p2[2];
-  pipe(p1);
-  pipe(p2);
-  if(pid==0){
-    close(p1[0]);
-    close(p1[1]);
-  }
-  else if(pid==0){
-    close(p2[0]);
-    close(p2[1]);
-  }
-  else{
-    exit(1);
-  }
-  exit(0);
+	int p[2];
+	pipe(p);
+  	int pid=fork();
+  	char byte;
+  	if(pid==0){
+		char tmp='X';
+	  	write(p[1],&tmp,1);
+	  	printf("%d: received ping\n", getpid());	
+  	}
+  	else{
+		wait(0);
+		read(p[1],&byte,1);
+	  	printf("%d: received pong\n", getpid());
+  	}
+  	exit(0);
 }
