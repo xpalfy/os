@@ -5,6 +5,25 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "sysinfo.h"
+
+// get sysinfo
+uint64
+sys_sysinfo(void)
+{
+  uint64 info; // user pointer
+  struct sysinfo kinfo;
+  struct proc *p = myproc();
+  if(argaddr(0, &info) < 0){
+    return -1;
+  }
+  kinfo.freemem = freemem();
+  kinfo.nproc = nproc();
+  if(copyout(p->pagetable, info, (char*)&kinfo, sizeof(kinfo)) < 0){
+    return -1;
+  }
+  return 0;
+}
 
 uint64
 sys_trace(void){
