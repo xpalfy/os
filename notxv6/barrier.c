@@ -25,13 +25,18 @@ barrier_init(void)
 static void 
 barrier()
 {
-  // YOUR CODE HERE
-  //
-  // Block until all threads have called barrier() and
-  // then increment bstate.round.
-  //
-  
+  pthread_mutex_lock(&bstate.barrier_mutex);       // zamkni/získaj zámok
+  bstate.nthread++;                               // zvýš počet vlákien, ktoré dosiahli bariéru
+  if(bstate.nthread == nthread){
+    bstate.round++;                             // zvýš počet kôl
+    bstate.nthread = 0;                         // resetuj počet vlákien, ktoré dosiahli bariéru
+    pthread_cond_broadcast(&bstate.barrier_cond); // uvoľni všetky vlákna, ktoré čakajú na bariéru
+  } else {
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex); // čakaj na bariéru
+  }
+  pthread_mutex_unlock(&bstate.barrier_mutex);     // odomkni/uvoľni zámok
 }
+  
 
 static void *
 thread(void *xa)
