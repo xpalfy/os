@@ -21,17 +21,15 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
-  char lock_name[7];
 } kmem[NCPU];
-
-
 
 void
 kinit()
 {
   for (int i = 0; i < NCPU; i++) {
-    snprintf(kmem[i].lock_name, sizeof(kmem[i].lock_name), "kmem_%d", i);
-    initlock(&kmem[i].lock, kmem[i].lock_name);
+    char name[9] = {0};
+    snprintf(name, 8, "kmem-%d", i);
+    initlock(&kmem[i].lock, name);
   }
   freerange(end, (void*)PHYSTOP);
 }
@@ -45,7 +43,7 @@ freerange(void *pa_start, void *pa_end)
     kfree(p);
 }
 
-// Free the page of physical memory pointed at by pa,
+// Free the page of physical memory pointed at by v,
 // which normally should have been returned by a
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
@@ -57,20 +55,41 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-  // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
-
-  r = (struct run*)pa;
-
   push_off();
-  int id = cpuid();
-
-  acquire(&kmem[id].lock);
-  r->next = kmem[id].freelist;
-  kmem[id].freelist = r;
-  release(&kmem[id].lock);
-
+  int cpu = cpuid();
+  memset(pa, 1, PGSIZE);
+  r = (struct run*)pa;
+  // --- critical session ---
+  acquire(&kmem[cpu].lock);
+  r->next = kmem[cpu].freelist;
+  kmem[cpu].freelist = r;
+  release(&kmem[cpu].lock);
+  // --- end of critical session ---
   pop_off();
+}
+
+// Try steal a free physical memory page from another core
+// interrupt should already be turned off
+// return NULL if not found free page
+void *
+ksteal(int cpu) {
+  struct run *r;
+  for (int i = 1; i < NCPU; i++) {
+    int next_cpu = (cpu + i) % NCPU;
+    // --- critical session ---
+    acquire(&kmem[next_cpu].lock);
+    r = kmem[next_cpu].freelist;
+    if (r) {
+      // steal one page
+      kmem[next_cpu].freelist = r->next;
+    }
+    release(&kmem[next_cpu].lock);
+    // --- end of critical session ---
+    if (r) {
+      break;
+    }
+  }
+  return r;
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -82,57 +101,24 @@ kalloc(void)
   struct run *r;
 
   push_off();
-  int id = cpuid();
 
-  acquire(&kmem[id].lock);
-  r = kmem[id].freelist;
-  if(r) {
-    kmem[id].freelist = r->next;
+  int cpu = cpuid();
+  // --- critical session ---
+  acquire(&kmem[cpu].lock);
+  r = kmem[cpu].freelist;
+  if (r) {
+    kmem[cpu].freelist = r->next;
   }
-  else {
-    // alloc failed, try to steal from other cpu
-    int success = 0;
-    int i = 0;
-    for(i = 0; i < NCPU; i++) {
-      if (i == id) continue;
-      acquire(&kmem[i].lock);
-      struct run *p = kmem[i].freelist;
-      if(p) {
-        // steal half of memory
-        // printf("%d steal from %d\n", id, i);
-        struct run *fp = p; // faster pointer
-        struct run *pre = p;
-        while (fp && fp->next) {
-          fp = fp->next->next;
-          pre = p;
-          p = p->next;
-        }
-        kmem[id].freelist = kmem[i].freelist;
-        if (p == kmem[i].freelist) {
-          // only have one page
-          kmem[i].freelist = 0;
-        }
-        else {
-          kmem[i].freelist = p;
-          pre->next = 0;
-        }
-        success = 1;
-      }
-      release(&kmem[i].lock);
-      if (success) {
-        r = kmem[id].freelist;
-        kmem[id].freelist = r->next;
-        break;
-      }
-    }
-    // if (i == NCPU) {
-    //   printf("alloc failed in %d: r=%p\n", id, r);
-    // }
+  release(&kmem[cpu].lock);
+  // --- end of critical session ---
+
+  if (r == 0) {
+    r = ksteal(cpu);
   }
-  release(&kmem[id].lock);
-  pop_off();
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+
+  pop_off();
   return (void*)r;
 }
