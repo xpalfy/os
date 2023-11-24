@@ -351,7 +351,6 @@ sys_open(void)
       memset(target, 0, MAXPATH);
       if (readi(ip, 0, (uint64)target, 0, MAXPATH) != MAXPATH)
       {
-        fileclose(f);
         iunlockput(ip);
         end_op();
         return -1;
